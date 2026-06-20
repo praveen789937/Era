@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { SouthIndianLanguage } from "./src/types";
+import { generateDynamicFallback, generateFallbackStudyGuide } from "./serverFallback";
 
 dotenv.config();
 
@@ -29,6 +31,14 @@ function getGeminiClient(): GoogleGenAI {
     });
   }
   return aiClient;
+}
+
+// Robust helper to strip markdown wrappers and parse JSON safely
+function cleanAndParseJSON(rawText: string): any {
+  let cleaned = rawText.trim();
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
+  cleaned = cleaned.replace(/\s*```$/, "");
+  return JSON.parse(cleaned.trim());
 }
 
 // Maps language code to descriptive name
@@ -114,14 +124,15 @@ const responseSchema = {
 
 // API Endpoint for Historical Synthesis
 app.post("/api/search", async (req, res) => {
+  const { query, language } = req.body;
+
+  if (!query || typeof query !== "string" || !query.trim()) {
+    return res.status(400).json({ error: "Search query is required." });
+  }
+
+  const langCode = (language || "en") as SouthIndianLanguage;
+
   try {
-    const { query, language } = req.body;
-
-    if (!query || typeof query !== "string" || !query.trim()) {
-      return res.status(400).json({ error: "Search query is required." });
-    }
-
-    const langCode = (language || "en") as string;
     const targetLanguageName = languageNames[langCode] || "English";
 
     // Initialize Gemini safely
@@ -162,13 +173,19 @@ app.post("/api/search", async (req, res) => {
       throw new Error("No response generated from the historian model.");
     }
 
-    const parsedData = JSON.parse(textOutput.trim());
+    const parsedData = cleanAndParseJSON(textOutput);
     return res.json(parsedData);
   } catch (error: any) {
-    console.error("Historical search API error:", error);
-    return res.status(500).json({
-      error: error?.message || "An unexpected error occurred while consulting the archives.",
-    });
+    console.warn("Historical search API encountered an issue. Activating localized Scriptorium offline fallback engine:", error?.message || error);
+    try {
+      const fallbackData = generateDynamicFallback(query, langCode as SouthIndianLanguage);
+      return res.json(fallbackData);
+    } catch (fallbackError: any) {
+      console.error("Critical fallback failure:", fallbackError);
+      return res.status(500).json({
+        error: error?.message || "An unexpected error occurred while consulting the archives.",
+      });
+    }
   }
 });
 
@@ -207,14 +224,15 @@ const studyGuideSchema = {
 
 // API Endpoint for Student Study Guide Generation
 app.post("/api/study-guide", async (req, res) => {
+  const { title, language, summary, timeline, lessons } = req.body;
+
+  if (!title || !timeline || !Array.isArray(timeline)) {
+    return res.status(400).json({ error: "Contextual historical analysis is required." });
+  }
+
+  const langCode = (language || "en") as SouthIndianLanguage;
+
   try {
-    const { title, language, summary, timeline, lessons } = req.body;
-
-    if (!title || !timeline || !Array.isArray(timeline)) {
-      return res.status(400).json({ error: "Contextual historical analysis is required." });
-    }
-
-    const langCode = (language || "en") as string;
     const targetLanguageName = languageNames[langCode] || "English";
     const ai = getGeminiClient();
 
@@ -251,13 +269,19 @@ app.post("/api/study-guide", async (req, res) => {
       throw new Error("No study materials generated.");
     }
 
-    const parsedData = JSON.parse(textOutput.trim());
+    const parsedData = cleanAndParseJSON(textOutput);
     return res.json(parsedData);
   } catch (error: any) {
-    console.error("Study Guide generation error:", error);
-    return res.status(500).json({
-      error: error?.message || "Historical archives were busy and couldn't construct the revision sheet.",
-    });
+    console.warn("Study Guide API encountered an issue. Activating localized Scriptorium study planner offline fallback:", error?.message || error);
+    try {
+      const fallbackData = generateFallbackStudyGuide(title, langCode as SouthIndianLanguage);
+      return res.json(fallbackData);
+    } catch (fallbackError: any) {
+      console.error("Critical study guide fallback failure:", fallbackError);
+      return res.status(500).json({
+        error: error?.message || "Historical archives were busy and couldn't construct the revision sheet.",
+      });
+    }
   }
 });
 

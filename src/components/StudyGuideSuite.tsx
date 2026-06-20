@@ -57,7 +57,14 @@ export function StudyGuideSuite({ data, onSaveStudyCache }: StudyGuideSuiteProps
       });
 
       if (!response.ok) {
-        throw new Error("Failed to compile study guide. Scriptorium archives are loaded.");
+        let errMsg = "Failed to compile study guide. Scriptorium archives are loaded.";
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errMsg = errData.error;
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
       const generatedGuide: StudyGuide = await response.json();
